@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jarvis</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050b14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bg:#050b14;--fg:#e6f1ff;--mut:#7f97b5;--card:#0b1727;--ac:#2fa0ff;--ac2:#19e3f0;--bd:#183049;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:radial-gradient(ellipse at 50% 0,#0a2036,var(--bg) 60%);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;max-width:600px;margin:0 auto;padding:10px}
+.top{display:flex;justify-content:space-between;align-items:center;color:var(--mut);font-size:13px}
+h1{font-size:16px;letter-spacing:.35em;margin:0;color:var(--ac2);text-shadow:0 0 12px var(--ac2)}
+.orbwrap{display:flex;flex-direction:column;align-items:center;padding:8px 0;flex:none}
+#orb{width:96px;height:96px;border-radius:50%;border:2px solid var(--ac2);cursor:pointer;background:radial-gradient(circle at 35% 30%,var(--ac2),var(--ac) 55%,#062a5a);box-shadow:0 0 28px var(--ac);transition:transform .2s}
+#orb.on{animation:p 1.2s ease-in-out infinite}#orb.talk{animation:p .5s ease-in-out infinite;filter:hue-rotate(-60deg)}
+@keyframes p{50%{transform:scale(1.12);box-shadow:0 0 60px var(--ac2),0 0 0 14px rgba(25,227,240,.12)}}
+#eq{display:flex;gap:4px;height:18px;align-items:flex-end;margin-top:8px;visibility:hidden}
+#eq i{width:5px;background:var(--ac2);border-radius:2px;height:4px}
+body.talk #eq{visibility:visible}body.talk #eq i{animation:e .6s ease-in-out infinite}
+#eq i:nth-child(2){animation-delay:.1s!important}#eq i:nth-child(3){animation-delay:.2s!important}#eq i:nth-child(4){animation-delay:.3s!important}#eq i:nth-child(5){animation-delay:.15s!important}
+@keyframes e{50%{height:18px}}
+#st{color:var(--mut);font-size:13px;min-height:18px;margin-top:4px;text-align:center}
+.chips{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,auto);gap:6px;overflow-x:auto;padding:4px 0;flex:none}
+.chip,button.b{padding:7px 12px;border-radius:999px;border:1px solid var(--bd);background:var(--card);color:var(--fg);font:14px inherit;font-family:inherit;cursor:pointer;white-space:nowrap}
+.chip:active,button.b:active{background:var(--ac)}
+#log{flex:1;min-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:6px 2px}
+.m{max-width:90%;padding:8px 12px;border-radius:14px;background:var(--card);border:1px solid var(--bd);white-space:pre-wrap;overflow-wrap:anywhere}
+.m.u{align-self:flex-end;background:var(--ac);color:#02101f;border-color:transparent}
+.m a{color:var(--ac2)}
+.cp{margin-top:6px;padding:4px 10px;border-radius:8px;border:1px solid var(--ac2);background:transparent;color:var(--ac2);font:13px inherit;font-family:inherit}
+.opts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:6px 0}
+button.b.act{background:var(--ac);color:#02101f;border-color:transparent}
+.bar{display:flex;gap:6px;padding-top:4px}
+input[type=text]{flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--fg);font-size:16px;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="top"><h1>JARVIS</h1><span id="clk"></span></div>
+<div class="orbwrap"><button id="orb" aria-label="Hablar con Jarvis"></button><div id="eq"><i></i><i></i><i></i><i></i><i></i></div><div id="st">Toca la pantalla una vez y di “Jarvis”</div></div>
+<div class="chips" id="chips"></div>
+<div id="log" aria-live="polite"></div>
+<div class="opts">
+<button class="b" id="wake">Escucha siempre: apagado</button>
+<button class="b" id="mute">Voz: encendida</button>
+</div>
+<div class="bar"><input type="text" id="tx" placeholder="Escribe o di “Jarvis, ayuda”" autocomplete="off"><button class="b act" id="go">Enviar</button></div>
+<script>
+const $=id=>document.getElementById(id);
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null,starting=false,listening=false,wakeMode=false,voiceOn=true,speaking=false,awaiting=false,sample,wl=null,handles=[];
+const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+const sv=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let hist=ld("jv_h",[]),notes=ld("jv_notes",[]),tasks=ld("jv_t",[]);
+const norm=s=>s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[¿?¡!.,]/g,"").trim();
+function add(t,u,cp){const d=document.createElement("div");d.className="m"+(u?" u":"");d.textContent=t;
+  if(cp){d.appendChild(document.createElement("br"));const b=document.createElement("button");b.className="cp";b.textContent="Copiar";b.onclick=()=>copy(t,b);d.appendChild(b)}
+  $("log").appendChild(d);$("log").scrollTop=1e9;return d}
+async function copy(t,b){let ok=false;try{await navigator.clipboard.writeText(t);ok=true}catch(e){try{const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();ok=document.execCommand("copy");a.remove()}catch(x){}}
+  b.textContent=ok?"¡Copiado!":"No se pudo copiar";setTimeout(()=>b.textContent="Copiar",1500)}
+function nav(label,u){const d=document.createElement("div");d.className="m";const a=document.createElement("a");a.href=u;a.target="_blank";a.rel="noopener";a.textContent="↗ "+label;d.appendChild(a);$("log").appendChild(d);$("log").scrollTop=1e9;try{window.open(u,"_blank","noopener")}catch(e){}}
+const status=t=>$("st").textContent=t;
+function setState(s){$("orb").className=s;document.body.classList.toggle("talk",s==="talk")}
+function speak(t){return new Promise(res=>{
+  if(!voiceOn||!window.speechSynthesis){res();return}
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t.replace(/[*_#`]/g,""));u.lang="es-ES";
+  const v=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith("es"));if(v)u.voice=v;
+  u.onstart=()=>{speaking=true;setState("talk");if(rec&&listening)try{rec.stop()}catch(e){}};
+  const end=()=>{speaking=false;setState(listening?"on":"");res();if(wakeMode&&!listening)setTimeout(startRec,250)};
+  u.onend=end;u.onerror=end;speechSynthesis.speak(u)})}
+async function reply(t){add(t);status("Hablando…");await speak(t);status(wakeMode?"Esperando “Jarvis”…":"Listo")}
+function beep(){try{const c=new(window.AudioContext||window.webkitAudioContext)();let i=0;const f=()=>{if(i++>5)return;const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=880;g.gain.value=.15;o.start();o.stop(c.currentTime+.18);setTimeout(f,350)};f();navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}}
+function sched(ms,label){handles.push(setTimeout(()=>{add("⏰ "+label);beep();speak(label)},ms))}
+const chistes=["¿Por qué los programadores confunden Halloween con Navidad? Porque 31 de octubre es igual a 25 de diciembre.","Un SQL entra a un bar, se acerca a dos mesas y pregunta: ¿puedo unirme?","¿Qué le dice un bit a otro? Nos vemos en el bus.","Mi contraseña es “incorrecta”, así siempre me recuerda cuál es.","¿Por qué el judoka llegó tarde? Porque se cayó del tatami del tiempo."];
+const datos=["Los pulpos tienen tres corazones y sangre azul.","La miel es el único alimento que no caduca si se conserva bien.","Un día en Venus dura más que un año en Venus.","El primer vídeo de YouTube se subió en 2005 y dura 19 segundos.","Las abejas pueden reconocer rostros humanos."];
+const pick=a=>a[Math.random()*a.length|0];
+const sitios={youtube:"https://www.youtube.com",google:"https://www.google.com",wikipedia:"https://es.wikipedia.org",maps:"https://maps.google.com",gmail:"https://mail.google.com",spotify:"https://open.spotify.com",tiktok:"https://www.tiktok.com",instagram:"https://www.instagram.com",facebook:"https://www.facebook.com",whatsapp:"https://web.whatsapp.com",netflix:"https://www.netflix.com",twitter:"https://x.com"};
+function calc(q){let e=q.replace(/\bpor\b|\bx\b/g,"*").replace(/\bmas\b/g,"+").replace(/\bmenos\b/g,"-").replace(/\bentre\b|\bdividido( entre| por)?\b/g,"/").replace(/,/g,".").replace(/[^0-9+\-*/().\s]/g,"");
+  if(!/\d/.test(e))return null;try{const r=Function('"use strict";return ('+e+')')();return isFinite(r)?String(Math.round(r*1e6)/1e6):null}catch(x){return null}}
+// ---------- IA ----------
+// Pega aquí la URL de tu Worker (por ejemplo https://jarvis.tuusuario.workers.dev)
+const WORKER_URL="PON_AQUI_LA_URL_DE_TU_WORKER";
+async function getSample(){if(WORKER_URL.startsWith("PON_AQUI"))return false;return async(msgs,o)=>{let r;try{r=await fetch(WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:msgs,tier:(o&&o.modelTier)||"default"})})}catch(x){const e=new Error("red");e.code="network";throw e}if(!r.ok){const e=new Error("http");e.code=r.status===429?"rate_limited":"error";throw e}return await r.json()}}
+const errMsg=e=>!e?"Aún no he conectado mi inteligencia artificial. Los comandos básicos siguen funcionando.":e.code==="network"?"No hay conexión con mi inteligencia artificial.":e.code==="rate_limited"?"Voy muy rápido, dame unos segundos.":e.code==="not_granted"?"Necesito tu permiso para usar mi inteligencia artificial.":"Mi inteligencia artificial falló, inténtalo de nuevo.";
+const SYS="Eres Jarvis, un asistente personal de voz en español, amable, ingenioso y muy conciso. Responde en máximo 3 frases cortas, sin markdown ni listas, porque tus respuestas se leen en voz alta.";
+async function chat(t){
+  const th=add("…");status("Pensando…");
+  try{const s=await getSample();if(!s)throw 0;
+    const msgs=hist.concat([{role:"user",content:t}]);msgs[0]={role:"user",content:SYS+"\n\n"+msgs[0].content};
+    const r=await s(msgs,{cache:false,modelTier:"quick"});const a=(r.text||"").trim()||"No pude pensar una respuesta.";
+    hist.push({role:"user",content:t},{role:"assistant",content:a});hist=hist.slice(-16);sv("jv_h",hist);th.remove();return reply(a)}
+  catch(e){th.remove();return reply(errMsg(e))}}
+async function task(sys,user,short){
+  const th=add("…");status("Creando…");
+  try{const s=await getSample();if(!s)throw 0;
+    const r=await s([{role:"user",content:sys+"\n\n"+user}],{cache:false,modelTier:"default"});
+    th.remove();add((r.text||"").trim()||"No pude generarlo.",false,true);status("Listo");await speak(short);status(wakeMode?"Esperando “Jarvis”…":"Listo")}
+  catch(e){th.remove();return reply(errMsg(e))}}
+const NOTA=" No tienes datos en vivo: avisa en una frase final de que conviene comprobar las tendencias y estadísticas en cada app.";
+const SEO="Eres experto en SEO y algoritmos de vídeo corto de TikTok, Instagram y Facebook, en español. A partir del tema, entrega TRES bloques listos para copiar y pegar, sin markdown, con etiquetas en mayúsculas.\nTIKTOK: 5 palabras clave para el buscador de TikTok, gancho de los 3 primeros segundos, título corto (máx. 60 caracteres), descripción optimizada y 3-5 hashtags.\nINSTAGRAM: gancho, texto alternativo, pie con palabras clave, 3-5 hashtags muy relevantes, idea de Reel, idea de portada y palabras clave para el nombre del perfil.\nFACEBOOK: título, descripción para Reel/vídeo, palabras clave para el buscador de Facebook, texto de publicación que invite a comentar y compartir y 1-3 hashtags.\nCada bloque incluye título, descripción, hashtags y gancho. Cierra con el mejor horario orientativo para publicar en cada red (hora de España)."+NOTA;
+const HOR="Indica los mejores horarios orientativos (hora de España) para publicar vídeos sobre el tema del usuario en TikTok, Instagram y Facebook, en lista breve con el motivo de cada uno, sin markdown."+NOTA;
+const NIC="Propón 8 nichos o ideas de vídeo de baja competencia para TikTok, Instagram y Facebook (relacionadas con la petición del usuario si la hay), cada una con palabra clave principal y ángulo del vídeo, sin markdown."+NOTA;
+const GUI="Escribe un guion de vídeo corto en español de 45 segundos (o la duración que pida el usuario, entre 30 y 60). Formato: GANCHO (0-3 s) y luego ESCENAS numeradas con tiempo; en cada una: PLANO (tipo de plano y movimiento de cámara), ACCIÓN, LOCUCIÓN y TEXTO EN PANTALLA. Cierra con llamada a la acción y una descripción breve. Sin markdown.";
+// ---------- comandos ----------
+async function handle(raw){
+  const t=norm(raw);if(!t)return;add(raw,true);let m;
+  if(/^(hola|buenas|hey)\b/.test(t))return reply("Hola, ¿en qué te ayudo?");
+  if(/quien eres|como te llamas/.test(t))return reply("Soy Jarvis, tu asistente personal. Entiendo comandos y, si no los conozco, pienso la respuesta con inteligencia artificial.");
+  if(/\bayuda\b|que puedes hacer|comandos/.test(t))return reply("Puedo decir la hora y fecha, poner temporizadores y alarmas, calcular, guardar notas y tareas, abrir webs, poner música o vídeos de YouTube, buscar en Google, ver el tiempo y las noticias, contar chistes y datos curiosos, traducir, resumir, redactar mensajes, escribir guiones y crear el SEO para TikTok, Instagram y Facebook. Y charlo contigo sobre lo que quieras.");
+  if(/olvida.*(conversacion|todo)|borra.*conversacion/.test(t)){hist=[];sv("jv_h",hist);return reply("Conversación olvidada")}
+  if(/que hora es|la hora/.test(t))return reply("Son las "+new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}));
+  if(/que dia es|la fecha|que fecha|a cuantos estamos/.test(t))return reply("Hoy es "+new Date().toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"}));
+  if(/chiste/.test(t))return reply(pick(chistes));
+  if(/dato curioso|curiosidad/.test(t))return reply(pick(datos));
+  if(/(cancela|quita|para).*(temporizador|alarma|cuenta)/.test(t)){handles.forEach(clearTimeout);handles=[];return reply("Temporizadores y alarmas cancelados")}
+  if(m=t.match(/alarma.*?(?:a las|para las)\s*(\d{1,2})(?::(\d{2}))?/)){let h=+m[1],mi=+(m[2]||0);if(/tarde|noche/.test(t)&&h<12)h+=12;const d=new Date();d.setHours(h,mi,0,0);if(d<=new Date())d.setDate(d.getDate()+1);
+    sched(d-new Date(),"Es la hora de tu alarma de las "+h+":"+String(mi).padStart(2,"0"));return reply("Alarma puesta a las "+h+":"+String(mi).padStart(2,"0")+". Mantén esta página abierta para que suene.")}
+  if(m=t.match(/(?:temporizador|alarma|cronometro|avisame|cuenta atras).*?(\d+)\s*(segundo|minuto|hora)/)){const n=+m[1],u=m[2];sched(n*(u==="hora"?3600000:u==="minuto"?60000:1000),"Tu temporizador de "+n+" "+u+(n>1?"s":"")+" ha terminado");return reply("Temporizador de "+n+" "+u+(n>1?"s":"")+" en marcha. Mantén esta página abierta.")}
+  if(m=t.match(/^(?:anade|agrega|apunta|pon)\s+(?:una\s+)?tarea(?:\s+de|\s+que)?\s+(.+)/)){tasks.push({t:raw.replace(/^.*?tarea(?:\s+de|\s+que)?\s+/i,""),d:0});sv("jv_t",tasks);return reply("Tarea añadida")}
+  if(/mis tareas|lista de tareas|que tareas|ver tareas/.test(t))return reply(tasks.length?"Tus tareas:\n"+tasks.map((x,i)=>(i+1)+". "+(x.d?"✓ ":"☐ ")+x.t).join("\n"):"No tienes tareas pendientes");
+  if(m=t.match(/(?:completa|tacha|termina|hecha)\s+(?:la\s+)?tarea\s+(\d+)/)){const x=tasks[m[1]-1];if(x){x.d=1;sv("jv_t",tasks);return reply("Tarea completada")}return reply("No encuentro esa tarea")}
+  if(/borra.*tareas/.test(t)){tasks=[];sv("jv_t",tasks);return reply("Tareas borradas")}
+  if(/borra.*notas/.test(t)){notes=[];sv("jv_notes",notes);return reply("Notas borradas")}
+  if(/mis notas|lee.*notas|ver notas/.test(t))return reply(notes.length?"Tus notas:\n"+notes.map((n,i)=>(i+1)+". "+n).join("\n"):"No tienes notas guardadas");
+  if(m=raw.match(/^(?:an[oó]ta|apunta|nota|guarda(?: una nota)?)(?: que)?[:,]?\s+(.+)/i)){notes.push(m[1]);sv("jv_notes",notes);return reply("Anotado: "+m[1])}
+  if(m=t.match(/^(?:calcula|cuanto es|cuanto son)\s+(.+)/)||(/^[\d\s+\-*/x().]+$/.test(t)&&/\d.*[+\-*/x].*\d/.test(t)?[0,t]:null)){const r=calc(m[1]);if(r!==null)return reply("El resultado es "+r)}
+  if(/^traduc|\btraduce\b/.test(t))return task("Cumple la petición de traducción del usuario. Devuelve solo la traducción, sin explicaciones.",raw,"Aquí tienes la traducción.");
+  if(/^resum/.test(t))return task("Resume el texto del usuario en español en un máximo de 5 frases claras. Sin markdown.",raw,"Aquí tienes el resumen.");
+  if(/(redacta|escribe|prepara|hazme).*(mensaje|correo|email|whatsapp|carta)/.test(t))return task("Redacta un mensaje listo para enviar, en español, con tono natural y adecuado a lo que pide el usuario. Devuelve solo el mensaje.",raw,"Aquí tienes el mensaje.");
+  if(/gui[o]n/.test(t))return task(GUI,"Petición: "+raw,"Listo, tienes el guion en pantalla.");
+  if(/(horarios?|mejor(es)? hora).*(public|subir|postear)|cuando (publico|subo)/.test(t))return task(HOR,"Tema: "+raw,"Aquí tienes los horarios sugeridos.");
+  if(/nichos?|baja competencia/.test(t))return task(NIC,"Petición: "+raw,"Aquí tienes nichos de baja competencia.");
+  if(/\bseo\b|hashtags|posicion(a|ar)/.test(t))return task(SEO,"Tema: "+raw,"Listo, tienes el SEO de TikTok, Instagram y Facebook en pantalla para copiar.");
+  if(m=t.match(/^(?:pon|ponme|reproduce|escuchar|youtube|busca en youtube)\s+(?:musica |la cancion |el video |un video |videos? )?(?:de |sobre )?(.+)/)){nav("YouTube: "+m[1],"https://www.youtube.com/results?search_query="+encodeURIComponent(m[1]));return reply("Te abro YouTube con "+m[1]+". Toca el enlace si no se abre solo.")}
+  if(m=t.match(/noticias(?:\s+(?:de|sobre))?\s*(.*)/)){nav("Noticias","https://news.google.com/"+(m[1]?"search?q="+encodeURIComponent(m[1])+"&hl=es":"?hl=es"));return reply("Te abro las noticias"+(m[1]?" de "+m[1]:"")+".")}
+  if(/que tiempo|el tiempo|el clima|tiempo en|clima en|llovera|va a llover|temperatura/.test(t)){const p=(t.match(/(?:tiempo|clima|temperatura)\s+(?:en|de)\s+(.+)/)||[])[1]||"";nav("Tiempo"+(p?" en "+p:""),"https://www.google.com/search?q="+encodeURIComponent("tiempo "+p));return reply("Te abro el tiempo"+(p?" en "+p:"")+".")}
+  if(m=t.match(/^(?:busca|buscar|googlea|investiga)(?: en google| en internet)?\s+(.+)/)){nav("Buscar: "+m[1],"https://www.google.com/search?q="+encodeURIComponent(m[1]));return reply("Buscando "+m[1]+" en internet.")}
+  if((m=t.match(/(?:abre|abrir|ve a|ir a)\s+(?:la |el )?(\w+)/))&&sitios[m[1]]){nav(m[1],sitios[m[1]]);return reply("Abriendo "+m[1])}
+  return chat(raw);
+}
+// ---------- voz ----------
+const WAKE=/\b(jarvis|yarvis|jarbis|charvis|harvis|jarvi|yarvi|jarbi|jarvy|yarvy|garvis|harvi|charvi|jarves|jervis|yervis)\b/;
+function startRec(){
+  if(!SR){reply("Tu navegador no admite reconocimiento de voz. Usa Chrome o Safari, o escribe tus órdenes.");return}
+  if(listening||speaking||starting)return;starting=true;
+  rec=new SR();rec.lang="es-ES";rec.continuous=wakeMode;rec.interimResults=false;
+  rec.onstart=()=>{starting=false;listening=true;setState("on");status(wakeMode?"Esperando “Jarvis”…":"Te escucho…")};
+  rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(!e.results[i].isFinal)continue;let t=e.results[i][0].transcript.trim();
+    if(wakeMode&&!awaiting){const n=norm(t);if(!WAKE.test(n))continue;t=t.replace(new RegExp("^.*?"+WAKE.source+"[,\\s]*","i"),"");if(!t.trim()){awaiting=true;setTimeout(()=>awaiting=false,10000);reply("Dime");continue}}
+    awaiting=false;handle(t)}};
+  rec.onerror=e=>{starting=false;if(e.error==="not-allowed"||e.error==="service-not-allowed"){wakeMode=false;$("wake").textContent="Escucha siempre: apagado";$("wake").classList.remove("act");status("Permiso de micrófono denegado. Actívalo en los ajustes del navegador.")}};
+  rec.onend=()=>{starting=false;listening=false;setState(speaking?"talk":"");if(wakeMode&&!speaking)setTimeout(startRec,300);else if(!speaking&&$("st").textContent==="Te escucho…")status("Toca la esfera y habla")};
+  try{rec.start()}catch(e){starting=false}}
+async function lock(on){try{if(on&&navigator.wakeLock)wl=await navigator.wakeLock.request("screen");else if(wl){wl.release();wl=null}}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&wakeMode)lock(true)});
+$("orb").onclick=()=>{if(wakeMode){awaiting=true;setTimeout(()=>awaiting=false,10000);status("Te escucho…");if(!listening)startRec();return}if(listening){try{rec.stop()}catch(e){}}else{window.speechSynthesis&&speechSynthesis.cancel();startRec()}};
+function setWake(on){wakeMode=on;$("wake").textContent="Escucha siempre: "+(on?"encendido":"apagado");$("wake").classList.toggle("act",on);lock(on);if(listening)try{rec.stop()}catch(e){}if(on)setTimeout(startRec,350);else status("Toca la esfera y habla")}
+$("wake").onclick=()=>setWake(!wakeMode);
+document.addEventListener("pointerdown",e=>{if(!wakeMode&&SR&&!e.target.closest("#wake,#mute,#tx,#go"))setWake(true)},{once:true});
+$("mute").onclick=()=>{voiceOn=!voiceOn;$("mute").textContent="Voz: "+(voiceOn?"encendida":"apagada");if(!voiceOn&&window.speechSynthesis)speechSynthesis.cancel()};
+const send=()=>{const v=$("tx").value;$("tx").value="";if(v.trim())handle(v)};
+$("go").onclick=send;$("tx").onkeydown=e=>{if(e.key==="Enter")send()};
+// ---------- botones ----------
+const CH=[["🕐 Hora","qué hora es"],["📅 Fecha","qué día es hoy"],["😄 Chiste","cuéntame un chiste"],["💡 Dato","dime un dato curioso"],["✅ Tareas","mis tareas"],["📝 Notas","mis notas"],["🌤 Tiempo","qué tiempo hace"],["📰 Noticias","noticias"],
+["⏱ Temporizador",null,"Pon un temporizador de 5 minutos"],["⏰ Alarma",null,"Pon una alarma a las 7:30"],["🧮 Calcular",null,"Calcula 12 por 8"],["➕ Tarea",null,"Añade tarea "],["✍ Nota",null,"Anota "],["▶ YouTube",null,"Pon música de "],["🔎 Buscar",null,"Busca "],
+["🌐 Traducir",null,"Traduce al inglés: "],["📄 Resumir",null,"Resume este texto: "],["💬 Mensaje",null,"Redacta un mensaje para "],["🎬 Guion",null,"Guion de 45 segundos sobre "],["📈 SEO",null,"SEO para un vídeo sobre "],["🕒 Horarios",null,"Mejores horarios para publicar vídeos de "],["🌱 Nichos",null,"Nichos de baja competencia sobre "],["❓ Ayuda","ayuda"]];
+CH.forEach(c=>{const b=document.createElement("button");b.className="chip";b.textContent=c[0];b.onclick=()=>{if(c[1])handle(c[1]);else{$("tx").value=c[2];$("tx").focus()}};$("chips").appendChild(b)});
+const clk=()=>$("clk").textContent=new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"});clk();setInterval(clk,15000);
+add("Hola, soy Jarvis. Toca la esfera para hablarme, activa “Escucha siempre” para llamarme por mi nombre, usa los botones o escribe abajo. Di “ayuda” para ver todo lo que sé hacer.");
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+</script>
+</body>
+</html>
