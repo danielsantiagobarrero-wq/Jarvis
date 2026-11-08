@@ -84,7 +84,7 @@ function calc(q){let e=q.replace(/\bpor\b|\bx\b/g,"*").replace(/\bmas\b/g,"+").r
   if(!/\d/.test(e))return null;try{const r=Function('"use strict";return ('+e+')')();return isFinite(r)?String(Math.round(r*1e6)/1e6):null}catch(x){return null}}
 // ---------- IA ----------
 // Pega aquí la URL de tu Worker (por ejemplo https://jarvis.tuusuario.workers.dev)
-const WORKER_URL="PON_AQUI_LA_URL_DE_TU_WORKER";
+const WORKER_URL="https://jarvis.danielsantiagobarrero.workers.dev";
 async function getSample(){if(WORKER_URL.startsWith("PON_AQUI"))return false;return async(msgs,o)=>{let r;try{r=await fetch(WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:msgs,tier:(o&&o.modelTier)||"default"})})}catch(x){const e=new Error("red");e.code="network";throw e}if(!r.ok){const e=new Error("http");e.code=r.status===429?"rate_limited":"error";throw e}return await r.json()}}
 const errMsg=e=>!e?"Aún no he conectado mi inteligencia artificial. Los comandos básicos siguen funcionando.":e.code==="network"?"No hay conexión con mi inteligencia artificial.":e.code==="rate_limited"?"Voy muy rápido, dame unos segundos.":e.code==="not_granted"?"Necesito tu permiso para usar mi inteligencia artificial.":"Mi inteligencia artificial falló, inténtalo de nuevo.";
 const SYS="Eres Jarvis, un asistente personal de voz en español, amable, ingenioso y muy conciso. Responde en máximo 3 frases cortas, sin markdown ni listas, porque tus respuestas se leen en voz alta.";
@@ -106,6 +106,18 @@ const SEO="Eres experto en SEO y algoritmos de vídeo corto de TikTok, Instagram
 const HOR="Indica los mejores horarios orientativos (hora de España) para publicar vídeos sobre el tema del usuario en TikTok, Instagram y Facebook, en lista breve con el motivo de cada uno, sin markdown."+NOTA;
 const NIC="Propón 8 nichos o ideas de vídeo de baja competencia para TikTok, Instagram y Facebook (relacionadas con la petición del usuario si la hay), cada una con palabra clave principal y ángulo del vídeo, sin markdown."+NOTA;
 const GUI="Escribe un guion de vídeo corto en español de 45 segundos (o la duración que pida el usuario, entre 30 y 60). Formato: GANCHO (0-3 s) y luego ESCENAS numeradas con tiempo; en cada una: PLANO (tipo de plano y movimiento de cámara), ACCIÓN, LOCUCIÓN y TEXTO EN PANTALLA. Cierra con llamada a la acción y una descripción breve. Sin markdown.";
+const wdesc=c=>c==0?"despejado":c<=2?"poco nublado":c==3?"nublado":c<=48?"con niebla":c<=57?"con llovizna":c<=67?"con lluvia":c<=77?"con nieve":c<=82?"con chubascos":c<=86?"con nevadas":"con tormenta";
+async function tiempo(p,man){
+  const place=p||"Zaragoza";
+  try{
+    const g=await(await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=es&name="+encodeURIComponent(place))).json();
+    const l=g.results&&g.results[0];if(!l)return reply("No encuentro el lugar "+place+".");
+    const w=await(await fetch("https://api.open-meteo.com/v1/forecast?latitude="+l.latitude+"&longitude="+l.longitude+"&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=2")).json();
+    const c=w.current,d=w.daily,i=man?1:0,r=Math.round;
+    const txt=man?"Mañana en "+l.name+": "+wdesc(d.weather_code[1])+", mínima de "+r(d.temperature_2m_min[1])+" y máxima de "+r(d.temperature_2m_max[1])+" grados, con "+d.precipitation_probability_max[1]+" por ciento de probabilidad de lluvia.":"En "+l.name+" ahora hace "+r(c.temperature_2m)+" grados, "+wdesc(c.weather_code)+", con sensación de "+r(c.apparent_temperature)+". Hoy mínima de "+r(d.temperature_2m_min[0])+" y máxima de "+r(d.temperature_2m_max[0])+", con "+d.precipitation_probability_max[0]+" por ciento de probabilidad de lluvia y viento de "+r(c.wind_speed_10m)+" kilómetros por hora.";
+    return reply(txt)
+  }catch(e){nav("Tiempo en "+place,"https://www.google.com/search?q="+encodeURIComponent("tiempo "+place));return reply("No pude leer el tiempo desde aquí, te abro Google.")}
+}
 // ---------- comandos ----------
 async function handle(raw){
   const t=norm(raw);if(!t)return;add(raw,true);let m;
@@ -138,7 +150,7 @@ async function handle(raw){
   if(/\bseo\b|hashtags|posicion(a|ar)/.test(t))return task(SEO,"Tema: "+raw,"Listo, tienes el SEO de TikTok, Instagram y Facebook en pantalla para copiar.");
   if(m=t.match(/^(?:pon|ponme|reproduce|escuchar|youtube|busca en youtube)\s+(?:musica |la cancion |el video |un video |videos? )?(?:de |sobre )?(.+)/)){nav("YouTube: "+m[1],"https://www.youtube.com/results?search_query="+encodeURIComponent(m[1]));return reply("Te abro YouTube con "+m[1]+". Toca el enlace si no se abre solo.")}
   if(m=t.match(/noticias(?:\s+(?:de|sobre))?\s*(.*)/)){nav("Noticias","https://news.google.com/"+(m[1]?"search?q="+encodeURIComponent(m[1])+"&hl=es":"?hl=es"));return reply("Te abro las noticias"+(m[1]?" de "+m[1]:"")+".")}
-  if(/que tiempo|el tiempo|el clima|tiempo en|clima en|llovera|va a llover|temperatura/.test(t)){const p=(t.match(/(?:tiempo|clima|temperatura)\s+(?:en|de)\s+(.+)/)||[])[1]||"";nav("Tiempo"+(p?" en "+p:""),"https://www.google.com/search?q="+encodeURIComponent("tiempo "+p));return reply("Te abro el tiempo"+(p?" en "+p:"")+".")}
+  if(/que tiempo|el tiempo|el clima|tiempo en|clima en|llovera|va a llover|temperatura/.test(t)){const p=((t.match(/(?:tiempo|clima|temperatura)\s+(?:en|de)\s+(.+)/)||[])[1]||"").replace(/\b(manana|hoy)\b/g,"").trim();return tiempo(p,/manana/.test(t))}
   if(m=t.match(/^(?:busca|buscar|googlea|investiga)(?: en google| en internet)?\s+(.+)/)){nav("Buscar: "+m[1],"https://www.google.com/search?q="+encodeURIComponent(m[1]));return reply("Buscando "+m[1]+" en internet.")}
   if((m=t.match(/(?:abre|abrir|ve a|ir a)\s+(?:la |el )?(\w+)/))&&sitios[m[1]]){nav(m[1],sitios[m[1]]);return reply("Abriendo "+m[1])}
   return chat(raw);
